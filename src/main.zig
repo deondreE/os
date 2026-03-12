@@ -10,6 +10,7 @@ const timer = @import("drivers/timer.zig");
 const thread = @import("thread.zig");
 const sync = @import("sync.zig");
 const heap = @import("heap.zig");
+const ata = @import("drivers/ata.zig");
 
 pub export fn outb(port: u16, data: u8) void {
     asm volatile ("outb %[data], %[port]"
@@ -29,6 +30,21 @@ pub export fn outl(port: u16, data: u32) void {
     asm volatile ("outl %[data], %[port]"
         :
         : [data] "{eax}" (data),
+          [port] "{dx}" (port),
+    );
+}
+
+pub export fn inw(port: u16) u16 {
+    return asm volatile ("inw %[port], %[result]"
+        : [result] "={ax}" (-> u16),
+        : [port] "{dx}" (port),
+    );
+}
+
+pub export fn outw(port: u16, data: u16) void {
+    asm volatile ("outw %[data], %[port]"
+        :
+        : [data] "{ax}" (data),
           [port] "{dx}" (port),
     );
 }
@@ -90,12 +106,7 @@ fn setIdtGate(n: u8, handler: u32) void {
 
 export fn keyboardHandler() callconv(.{ .x86_interrupt = .{} }) void {
     const scancode = inb(0x60);
-    if (scancode < 0x80) {
-        const ascii = keyboard.scancodeToAscii(scancode);
-        if (ascii != 0) {
-            keyboard.push(ascii);
-        }
-    }
+    keyboard.handleScancode(scancode);
     outb(0x20, 0x20);
 }
 
@@ -284,23 +295,6 @@ pub fn timerInterruptStub() callconv(.naked) void {
 var main_thread: thread.Thread = undefined;
 var secondary_thread: *thread.Thread = undefined;
 
-fn taskA() void {
-    while (true) {
-        std.log.info("[Task A] Processing...", .{});
-        // Artificial delay loop
-        var i: u32 = 0;
-        while (i < 5000000) : (i += 1) asm volatile ("nop");
-    }
-}
-
-fn taskB() void {
-    while (true) {
-        std.log.info("[Task B] Monitoring...", .{});
-        var i: u32 = 0;
-        while (i < 5000000) : (i += 1) asm volatile ("nop");
-    }
-}
-
 fn shellTask() void {
     std.log.info("Shell Task Started. Type Something!", .{});
 
@@ -343,6 +337,19 @@ pub export fn kernelMain(magic: u32, mb_info_addr: usize) noreturn {
     heap.init();
     allocator = heap.allocator();
     std.log.info("Heap Allocator Online...", .{});
+
+    ata.identify() catch |err| {
+        std.log.warn("ATA indeitify failed: {}", .{err});
+    };
+
+    // Test read:
+    var sector_buf: [ata.SECTOR_SIZE]u8 = undefined;
+    ata.readSectors(0, 1, &sector_buf) catch |err| {
+        std.log.warn("ATA read failed: {}", .{err});
+    };
+    std.log.info("Sector 0 first bytes: {X} {X} {X} {X}", .{
+        sector_buf[0], sector_buf[1], sector_buf[510], sector_buf[511],
+    });
 
     pci.enumerate();
 

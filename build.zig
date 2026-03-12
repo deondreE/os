@@ -31,6 +31,16 @@ pub fn build(b: *std.Build) void { // Standard target options allow the person r
     exe.entry = .{ .symbol_name = "_start" };
     b.installArtifact(exe);
 
+    const disk_step = b.addSystemCommand(&[_][]const u8{
+        "qemu-img",
+        "create",
+        "-f",
+        "raw",
+        "zig-out/disk.img",
+        "4M",
+    });
+    disk_step.step.dependOn(b.getInstallStep());
+
     const qemu_step = b.addSystemCommand(&[_][]const u8{
         "qemu-system-i386",
         "-kernel",
@@ -43,16 +53,20 @@ pub fn build(b: *std.Build) void { // Standard target options allow the person r
         "stdio",
         "-no-reboot",
         "-no-shutdown",
+        "-drive",
+        "file=zig-out/disk.img,format=raw,index=0,media=disk",
         // "-d",
         // "int,cpu_reset",
         // // "-D",
         // "qemu.log",
     });
     qemu_step.step.dependOn(b.getInstallStep());
+    qemu_step.step.dependOn(&disk_step.step);
 
     const run_step = b.step("run", "Run the app in qu");
 
     // const run_cmd = b.addRunArtifact(exe);
+
     run_step.dependOn(&qemu_step.step);
     if (b.args) |args| {
         qemu_step.addArgs(args);
