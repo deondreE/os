@@ -8,7 +8,7 @@ pub const SpinLock = struct {
         while (self.state.cmpxchgWeak(
             0,
             1,
-            .aquire,
+            .acquire,
             .monotonic,
         ) != null) {
             //@Optimization: tell the CPU we are in spin lock.

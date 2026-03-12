@@ -41,17 +41,19 @@ pub fn getNext() *Thread {
     return thread_queue[current_idx].?;
 }
 
+var next_id: u32 = 2;
 pub fn spawn(allocator: std.mem.Allocator, entry: usize) !*Thread {
-    const stack = try allocator.alloc(u8, 4096);
+    const stack = try allocator.alloc(u8, 8192); // 8KB is safer for kernel tasks
+    @memset(stack, 0);
 
     var stack_top = @intFromPtr(stack.ptr) + stack.len;
 
     stack_top -= 4;
-    @as(*u32, @ptrFromInt(stack_top)).* = 0x202;
+    @as(*u32, @ptrFromInt(stack_top)).* = 0x202; // EFLAGS (Interrupts Enabled)
     stack_top -= 4;
-    @as(*u32, @ptrFromInt(stack_top)).* = 0x08;
+    @as(*u32, @ptrFromInt(stack_top)).* = 0x08; // CS
     stack_top -= 4;
-    @as(*u32, @ptrFromInt(stack_top)).* = @intCast(entry);
+    @as(*u32, @ptrFromInt(stack_top)).* = @intCast(entry); // EIP
 
     var i: usize = 0;
     while (i < 8) : (i += 1) {
@@ -60,8 +62,12 @@ pub fn spawn(allocator: std.mem.Allocator, entry: usize) !*Thread {
     }
 
     const t = try allocator.create(Thread);
-    t.stack_mem = stack;
-    t.stack_ptr = @intCast(stack_top);
-    t.status = .Ready;
+    t.* = .{
+        .stack_mem = stack,
+        .stack_ptr = @intCast(stack_top),
+        .id = next_id,
+        .status = .Ready,
+    };
+    next_id += 1;
     return t;
 }

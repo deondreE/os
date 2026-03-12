@@ -86,18 +86,21 @@ pub const VgaTerminal = struct {
     }
 
     fn scroll(self: *VgaTerminal) void {
-        var y: usize = 1;
-        while (y < height) : (y += 1) {
-            var x: usize = 0;
-            while (x < width) : (x += 1) {
-                vga_address[(y - 1) * width + x] = vga_address[y * width + x];
-            }
-        }
-        const space = @as(u16, ' ') | (@as(u16, self.color)) << 8;
-        var x: usize = 0;
-        while (x < width) : (x += 1) {
-            vga_address[(height - 1) * width + x] = space;
-        }
+        const screen_size = height * width;
+        const line_size = width;
+        const src_ptr = vga_address + line_size;
+        const dst_ptr = vga_address;
+
+        const dst_slice: []u16 = @as([*]u16, @ptrCast(@volatileCast(dst_ptr)))[0 .. screen_size - line_size];
+        const src_slice: []const u16 = @as([*]u16, @ptrCast(@volatileCast(src_ptr)))[0 .. screen_size - line_size];
+
+        std.mem.copyForwards(u16, dst_slice, src_slice);
+
+        const last_line_ptr = vga_address + (height - 1) * width;
+        const last_line_slice: []u16 = @as([*]u16, @ptrCast(@volatileCast(last_line_ptr)))[0..line_size];
+
+        const space = @as(u16, ' ') | (@as(u16, self.color) << 8);
+        @memset(last_line_slice, space);
         self.row = height - 1;
     }
 
@@ -116,14 +119,5 @@ pub const VgaTerminal = struct {
     pub fn writeFn(self: *VgaTerminal, msg: []const u8) error{}!usize {
         self.write(msg);
         return msg.len;
-    }
-};
-
-pub const Keyboard = struct {
-    const layouts = [128]u8{ 0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 0x08, '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n', 0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', 0, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, '*', 0, ' ', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-
-    pub fn scancodeToAscii(scancode: u8) u8 {
-        if (scancode >= 128) return 0;
-        return layouts[scancode];
     }
 };

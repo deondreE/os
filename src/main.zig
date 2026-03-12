@@ -1,4 +1,5 @@
 const std = @import("std");
+const keyboard = @import("drivers/keyboard.zig");
 const drivers = @import("drivers.zig");
 const c = @import("drivers/serial.zig");
 const pci = @import("drivers/pci.zig");
@@ -89,8 +90,10 @@ fn setIdtGate(n: u8, handler: u32) void {
 export fn keyboardHandler() callconv(.{ .x86_interrupt = .{} }) void {
     const scancode = inb(0x60);
     if (scancode < 0x80) {
-        const ascii = drivers.Keyboard.scancodeToAscii(scancode);
-        if (ascii != 0) terminal.putChar(ascii);
+        const ascii = keyboard.scancodeToAscii(scancode);
+        if (ascii != 0) {
+            keyboard.push(ascii);
+        }
     }
     outb(0x20, 0x20);
 }
@@ -296,6 +299,24 @@ fn taskB() void {
         while (i < 5000000) : (i += 1) asm volatile ("nop");
     }
 }
+
+fn shellTask() void {
+    std.log.info("Shell Task Started. Type Something!", .{});
+
+    while (true) {
+        if (keyboard.pop()) |ascii| {
+            terminal.putChar(ascii);
+
+            if (ascii == '\n') {
+                std.log.info("User submitted a command!", .{});
+            }
+        } else {
+            var i: u32 = 0;
+            while (i < 10000) : (i += 1) asm volatile ("pause");
+        }
+    }
+}
+
 pub export fn kernelMain(magic: u32, mb_info_addr: usize) noreturn {
     c.Serial.init();
     const info: *mb.Info = @ptrFromInt(mb_info_addr);
@@ -344,14 +365,17 @@ pub export fn kernelMain(magic: u32, mb_info_addr: usize) noreturn {
     var kthread = thread.Thread{ .stack_ptr = 0, .stack_mem = &.{}, .id = 1, .status = .Running };
     thread.init(&kthread);
 
-    const t1 = thread.spawn(allocator, @intFromPtr(&taskA)) catch unreachable;
-    const t2 = thread.spawn(allocator, @intFromPtr(&taskB)) catch unreachable;
-    thread.addThread(t1);
-    thread.addThread(t2);
+    // const t1 = thread.spawn(allocator, @intFromPtr(&taskA)) catch unreachable;
+    // const t2 = thread.spawn(allocator, @intFromPtr(&taskB)) catch unreachable;
+    // thread.addThread(t1);
+    // thread.addThread(t2);
+
+    const shell_thread = thread.spawn(allocator, @intFromPtr(&shellTask)) catch unreachable;
+    thread.addThread(shell_thread);
 
     timer.init(100);
-    outb(0x21, 0xFC); // Enable IRQ 0 (Timer)
     outb(0x21, 0xFD); // Enable Keyboard IRQ
+    outb(0x21, 0b11111100);
     asm volatile ("sti");
 
     while (true) asm volatile ("hlt");
