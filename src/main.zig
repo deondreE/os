@@ -9,6 +9,7 @@ const vmm = @import("vmm.zig");
 const timer = @import("drivers/timer.zig");
 const thread = @import("thread.zig");
 const sync = @import("sync.zig");
+const heap = @import("heap.zig");
 
 pub export fn outb(port: u16, data: u8) void {
     asm volatile ("outb %[data], %[port]"
@@ -317,6 +318,13 @@ fn shellTask() void {
     }
 }
 
+fn reaperTask() void {
+    while (true) {
+        thread.reapDead(allocator);
+        thread.sleep(500); // Reap every 500ms
+    }
+}
+
 pub export fn kernelMain(magic: u32, mb_info_addr: usize) noreturn {
     c.Serial.init();
     const info: *mb.Info = @ptrFromInt(mb_info_addr);
@@ -332,7 +340,8 @@ pub export fn kernelMain(magic: u32, mb_info_addr: usize) noreturn {
     vmm.init();
     std.log.info("Paging Enabled: Identity mapped 0-4MB", .{});
 
-    initHeap();
+    heap.init();
+    allocator = heap.allocator();
     std.log.info("Heap Allocator Online...", .{});
 
     pci.enumerate();
@@ -355,23 +364,14 @@ pub export fn kernelMain(magic: u32, mb_info_addr: usize) noreturn {
     terminal.write("Zig OS: Booted and Ready\n");
     terminal_ready = true;
 
-    // std.log.info("testing demand page...", .{});
-
-    // const magic_ptr: *volatile u32 = @ptrFromInt(0x500000);
-    // magic_ptr.* = 0xABCDE123;
-
-    // std.log.info("Successfully wrote 0x{X} to 0x500000 via Demand Paging!", .{magic_ptr.*});
-
-    var kthread = thread.Thread{ .stack_ptr = 0, .stack_mem = &.{}, .id = 1, .status = .Running };
+    var kthread = thread.Thread{ .stack_ptr = 0, .stack_mem = &.{}, .id = 1, .status = .Running, .priority = .Normal, .ticks_remaining = 0, .wake_tick = 0 };
     thread.init(&kthread);
 
-    // const t1 = thread.spawn(allocator, @intFromPtr(&taskA)) catch unreachable;
-    // const t2 = thread.spawn(allocator, @intFromPtr(&taskB)) catch unreachable;
-    // thread.addThread(t1);
-    // thread.addThread(t2);
-
-    const shell_thread = thread.spawn(allocator, @intFromPtr(&shellTask)) catch unreachable;
+    const shell_thread = thread.spawn(allocator, @intFromPtr(&shellTask), .High) catch unreachable;
     thread.addThread(shell_thread);
+
+    const reaper_thread = thread.spawn(allocator, @intFromPtr(&reaperTask), .Low) catch unreachable;
+    thread.addThread(reaper_thread);
 
     timer.init(100);
     outb(0x21, 0xFD); // Enable Keyboard IRQ

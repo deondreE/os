@@ -1,8 +1,10 @@
 const main = @import("../main.zig");
 
 pub var ticks: u64 = 0;
+pub var frequency: u32 = 0;
 
 pub fn init(hz: u32) void {
+    frequency = hz;
     const divisor = 1193180 / hz;
 
     main.outb(0x43, 0x36);
